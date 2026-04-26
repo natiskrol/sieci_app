@@ -1,73 +1,60 @@
 import streamlit as st
 from openai import OpenAI
-import os
 from pdf_reader import extract_text_from_pdf
 
-st.set_page_config(layout="wide", page_title="Gemini chatbot app")
-st.title("Gemini chatbot app")
-uploaded_file = st.file_uploader("Dodaj plik", type=("txt", "md", "pdf"))
+# 1. Konfiguracja strony
+st.set_page_config(layout="wide", page_title="Gemini Chatbot")
+st.title("Gemini Chatbot")
 
-# api_key, base_url = os.environ["API_KEY"], os.environ["BASE_URL"]
-api_key, base_url = st.secrets["API_KEY"], st.secrets["BASE_URL"]
+# 2. Sidebar - Klucze i pliki
+api_key = st.secrets["API_KEY"]
+base_url = st.secrets["BASE_URL"]
 selected_model = "gemini-2.5-flash"
 
-if "messages" not in st.session_state:
-    st.session_state["messages"] = [{"role": "assistant", "content": "How can I help you?."}]
+with st.sidebar:
+    uploaded_file = st.file_uploader("Wgraj plik (PDF lub TXT)", type=("pdf", "txt", "md"))
+    if st.button("Wyczyść historię"):
+        st.session_state.messages = [{"role": "assistant", "content": "W czym mogę Ci pomóc?"}]
+        st.rerun()
 
+# 3. Inicjalizacja historii wiadomości
+if "messages" not in st.session_state:
+    st.session_state.messages = [{"role": "assistant", "content": "W czym mogę Ci pomóc?"}]
+
+# 4. Wyświetlanie historii (WAŻNE: to musi być przed chat_input)
 for msg in st.session_state.messages:
     st.chat_message(msg["role"]).write(msg["content"])
 
+# 5. Obsługa nowego pytania
 if prompt := st.chat_input():
-    if not api_key:
-        st.info("Invalid API key.")
-        st.stop()
+    # Od razu dodajemy i wyświetlamy pytanie użytkownika
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    st.chat_message("user").write(prompt)
 
-    client = OpenAI(api_key=api_key, base_url=base_url)
-
-    # 1. Przygotowujemy zmienną na pełną treść (pytanie + ewentualny plik)
-    full_prompt = prompt 
-
-    # 2. Sprawdzamy, czy użytkownik wgrał jakikolwiek plik
+    # Przygotowanie treści dla AI (pytanie + ewentualny plik)
+    full_prompt = prompt
     if uploaded_file is not None:
-        # Jeśli to PDF, używamy naszej nowej funkcji z pliku pdf_handler.py
-        if uploaded_file.name.endswith('.pdf'):
-            from pdf_handler import extract_text_from_pdf
+        if uploaded_file.name.endswith(".pdf"):
             content = extract_text_from_pdf(uploaded_file)
         else:
-            # Jeśli to tekst/markdown, czytamy standardowo
             content = uploaded_file.read().decode("utf-8")
         
-        # Łączymy treść pliku z pytaniem
-        full_prompt = f"Treść dokumentu:\n{content}\n\nPytanie: {prompt}"
+        full_prompt = f"Użytkownik załączył plik o treści:\n{content}\n\nPytanie: {prompt}"
 
-    # 3. Wyświetlamy w chacie TYLKO krótkie pytanie użytkownika (żeby było ładnie)
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
-
-    # 4. Do Gemini wysyłamy historię + ten wzbogacony o plik "full_prompt"
-    # Podmieniamy ostatnią wiadomość na taką z treścią pliku
+    # Połączenie z API
+    client = OpenAI(api_key=api_key, base_url=base_url)
+    
+    # Przygotowanie paczki wiadomości do wysłania (z ukrytym plikiem)
     messages_to_send = st.session_state.messages[:-1] + [{"role": "user", "content": full_prompt}]
 
-    response = client.chat.completions.create(
-        model=selected_model,
-        messages=messages_to_send
-    )
+    # Pobranie odpowiedzi
+    with st.chat_message("assistant"):
+        response = client.chat.completions.create(
+            model=selected_model,
+            messages=messages_to_send
+        )
+        msg = response.choices[0].message.content
+        st.write(msg)
 
-    # 5. Wyświetlamy odpowiedź asystenta
-    msg = response.choices[0].message.content
+    # Zapisanie odpowiedzi asystenta do historii
     st.session_state.messages.append({"role": "assistant", "content": msg})
-    st.chat_message("assistant").write(msg)
-
-    client = OpenAI(api_key=api_key, base_url=base_url)
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    st.chat_message("user").write(prompt)
-    response = client.chat.completions.create(
-    model=selected_model,
-    messages=st.session_state.messages
-)
-
-    msg = response.choices[0].message.content
-    st.session_state.messages.append({"role": "assistant", "content": msg})
-    st.chat_message("assistant").write(msg)
-
-    
